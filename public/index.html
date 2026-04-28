@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keycloak Implicit Flow Example</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      text-align: center;
+    }
+    .btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background-color: #4caf50;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+      margin: 10px;
+      cursor: pointer;
+    }
+    .btn:hover {
+      background-color: #45a049;
+    }
+    pre {
+      text-align: left;
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Keycloak Implicit Flow (Minimal)</h1>
+  <p id="status">Initializing Keycloak...</p>
+
+  <div id="controls" style="display:none;">
+    <button id="btn-api" class="btn">Call /api/protected</button>
+    <button id="btn-logout" class="btn">Logout</button>
+  </div>
+
+  <h2>Access Token (payload)</h2>
+  <pre id="token-payload"></pre>
+
+  <h2>/api/protected response</h2>
+  <pre id="api-response"></pre>
+
+  <!-- keycloak-js с CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/keycloak-js@latest/dist/keycloak.min.js"></script>
+  <script>
+    // Конфиг Keycloak должен совпадать с .env / настройками клиента
+    const keycloak = new Keycloak({
+      url: 'http://10.0.2.15:8080',   // KEYCLOAK_URL
+      realm: 'master',                   // KEYCLOAK_REALM
+      clientId: 'test-client'            // KEYCLOAK_CLIENT_ID
+    });
+
+    function decodeJwtPayload(token) {
+      try {
+        const payload = token.split('.')[1];
+        const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+        return JSON.stringify(JSON.parse(decoded), null, 2);
+      } catch (e) {
+        return 'Failed to decode token payload';
+      }
+    }
+
+    keycloak
+      .init({
+        onLoad: 'login-required',
+        flow: 'implicit' // ключевой параметр для implicit flow
+      })
+      .then(authenticated => {
+        if (!authenticated) {
+          document.getElementById('status').textContent = 'Not authenticated, redirecting...';
+          return keycloak.login();
+        }
+
+        document.getElementById('status').textContent = 'Authenticated';
+        document.getElementById('controls').style.display = 'block';
+
+        // Показать payload access_token
+        document.getElementById('token-payload').textContent =
+          decodeJwtPayload(keycloak.token);
+
+        // Кнопка вызова API
+        document.getElementById('btn-api').onclick = () => {
+          fetch('/api/protected', {
+            headers: {
+              Authorization: 'Bearer ' + keycloak.token
+            }
+          })
+            .then(r => r.json())
+            .then(data => {
+              document.getElementById('api-response').textContent =
+                JSON.stringify(data, null, 2);
+            })
+            .catch(err => {
+              document.getElementById('api-response').textContent =
+                'Error: ' + err;
+            });
+        };
+
+        // Кнопка logout
+        document.getElementById('btn-logout').onclick = () => {
+          keycloak.logout({ redirectUri: window.location.origin });
+        };
+
+        // (опционально) периодическое обновление токена — в implicit refresh token нет,
+        // поэтому чаще просто логин/редирект при истечении срока. [web:36][web:35]
+      })
+      .catch(err => {
+        console.error('Failed to initialize Keycloak', err);
+        document.getElementById('status').textContent =
+          'Failed to initialize Keycloak';
+      });
+  </script>
+</body>
+</html>
