@@ -82,7 +82,7 @@
   <div class="section">
     <h2>Status</h2>
     <p id="status">Checking tokens...</p>
-    <p><strong>Current access_token (first 40 chars):</strong></p>
+    <p><strong>Current access_token (first 80 chars):</strong></p>
     <pre id="token-short"></pre>
   </div>
 
@@ -142,6 +142,15 @@
     <pre id="me-response"></pre>
   </div>
 
+  <!-- Кнопка запуска Implicit Flow на Keycloak -->
+  <div class="section ok">
+    <h2>Start Keycloak login</h2>
+    <p>
+      Если вы ещё не аутентифицированы через Keycloak, нажмите кнопку ниже.
+    </p>
+    <button class="btn" id="btn-login">Login via Keycloak (Implicit Flow)</button>
+  </div>
+
   <script>
     const KEYCLOAK_BASE = 'http://10.0.2.15:8080';
     const REALM = 'test-realm';
@@ -171,6 +180,7 @@
       return JSON.stringify(obj, null, 2);
     }
 
+    // Генератор nonce, совместимый со старыми браузерами
     function generateNonce(length = 32) {
       const chars =
         'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -214,6 +224,15 @@
       );
     }
 
+    function safeOnClick(id, handler) {
+      const el = document.getElementById(id);
+      if (!el) {
+        console.warn('Element not found for id =', id);
+        return;
+      }
+      el.onclick = handler;
+    }
+
     function init() {
       const statusEl = document.getElementById('status');
       const tokenShortEl = document.getElementById('token-short');
@@ -239,7 +258,7 @@
 
       if (!accessToken) {
         statusEl.textContent =
-          'Not authenticated via Keycloak. Click "Login" to start Implicit Flow.';
+          'Not authenticated via Keycloak. Click "Login via Keycloak" to start Implicit Flow.';
         tokenShortEl.textContent = '(no token)';
         tokenPayloadEl.textContent = '(no token payload)';
       } else {
@@ -255,17 +274,18 @@
 
         tokenUserEl.textContent = currentUserFromToken || '(unknown)';
 
-        if (currentUserFromToken) {
+        if (currentUserFromToken && normalUserInput) {
           normalUserInput.value = currentUserFromToken;
         }
       }
 
-      document.getElementById('btn-login').onclick = () => {
+      // Запуск Implicit Flow
+      safeOnClick('btn-login', () => {
         window.location.href = buildAuthUrl();
-      };
+      });
 
       // Нормальный сценарий: user_id = user из токена
-      document.getElementById('btn-login-normal').onclick = () => {
+      safeOnClick('btn-login-normal', () => {
         loginRespEl.textContent = '';
         if (!accessToken) {
           alert('No access token. Please login via Keycloak first.');
@@ -279,9 +299,7 @@
 
         fetch('/login', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             access_token: accessToken,
             user_id: userId
@@ -294,10 +312,10 @@
           .catch(err => {
             loginRespEl.textContent = 'Error: ' + err;
           });
-      };
+      });
 
       // Симуляция атаки: тот же токен, но другой user_id
-      document.getElementById('btn-login-attack').onclick = () => {
+      safeOnClick('btn-login-attack', () => {
         loginRespEl.textContent = '';
         if (!accessToken) {
           alert('No access token. Please login via Keycloak first.');
@@ -311,9 +329,7 @@
 
         fetch('/login', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             access_token: accessToken,
             user_id: userId
@@ -331,13 +347,12 @@
           .catch(err => {
             loginRespEl.textContent = 'Error: ' + err;
           });
-      };
+      });
 
-      document.getElementById('btn-me').onclick = () => {
+      // Просмотр серверной сессии
+      safeOnClick('btn-me', () => {
         meRespEl.textContent = '';
-        fetch('/me', {
-          credentials: 'include'
-        })
+        fetch('/me', { credentials: 'include' })
           .then(r => r.json())
           .then(data => {
             meRespEl.textContent = JSON.stringify(data, null, 2);
@@ -345,14 +360,12 @@
           .catch(err => {
             meRespEl.textContent = 'Error: ' + err;
           });
-      };
+      });
 
-      document.getElementById('btn-logout-backend').onclick = () => {
+      // Logout backend-сессии
+      safeOnClick('btn-logout-backend', () => {
         meRespEl.textContent = '';
-        fetch('/logout', {
-          method: 'POST',
-          credentials: 'include'
-        })
+        fetch('/logout', { method: 'POST', credentials: 'include' })
           .then(r => r.json())
           .then(data => {
             meRespEl.textContent = JSON.stringify(data, null, 2);
@@ -360,9 +373,9 @@
           .catch(err => {
             meRespEl.textContent = 'Error: ' + err;
           });
-      };
+      });
 
-      // Logout из Keycloak (опционально, можно вызвать из консоли)
+      // Logout из Keycloak (можно вызвать из консоли)
       window.logoutFromKeycloak = () => {
         window.location.href = buildLogoutUrl(idToken);
       };
