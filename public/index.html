@@ -77,13 +77,25 @@
       }
     }
 
+    // Генератор nonce, совместимый со старыми браузерами
+    function generateNonce(length = 32) {
+      const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let result = '';
+      for (let i = 0; i < length; i++) {
+        const idx = Math.floor(Math.random() * chars.length);
+        result += chars.charAt(idx);
+      }
+      return result;
+    }
+
     function buildAuthUrl() {
       const params = new URLSearchParams({
         client_id: CLIENT_ID,
         redirect_uri: REDIRECT_URI,
         response_type: 'id_token token', // implicit: id_token + access_token
         scope: 'openid profile email',
-        nonce: crypto.randomUUID()
+        nonce: generateNonce()
       });
 
       return (
@@ -134,17 +146,17 @@
           decodeJwtPayload(accessToken);
       }
 
-      // Кнопка Login — чистый redirect на auth endpoint
+      // Login → redirect на auth endpoint Keycloak
       document.getElementById('btn-login').onclick = () => {
         window.location.href = buildAuthUrl();
       };
 
-      // Кнопка Logout — redirect на logout endpoint
+      // Logout → redirect на logout endpoint Keycloak
       document.getElementById('btn-logout').onclick = () => {
         window.location.href = buildLogoutUrl(idToken);
       };
 
-      // Кнопка вызова API
+      // Вызов защищённого API
       document.getElementById('btn-api').onclick = () => {
         if (!accessToken) {
           alert('No access token. Please login first.');
