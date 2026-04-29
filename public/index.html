@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Implicit Flow Vulnerability Demo</title>
+  <title>Исследование уязвимсоти неправильного использования Implicite Flow</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -77,24 +77,24 @@
   </style>
 </head>
 <body>
-  <h1>Implicit Flow Vulnerability Demo (Keycloak + Express)</h1>
+  <h1>Исследование уязвимсоти неправильного использования Implicite Flow</h1>
 
   <div class="section">
-    <h2>Status</h2>
-    <p id="status">Checking tokens...</p>
-    <p><strong>Current access_token (first 80 chars):</strong></p>
+    <h2>Статус</h2>
+    <p id="status">Проверка токена...</p>
+    <p><strong>Текущий токен (80 симоволов):</strong></p>
     <pre id="token-short"></pre>
   </div>
 
   <div class="section">
-    <h2>Token payload</h2>
-    <p><strong>Decoded access_token payload:</strong></p>
+    <h2>Данные токена</h2>
+    <p><strong>Расширофанные данные токена:</strong></p>
     <pre id="token-payload"></pre>
-    <p><strong>Current user from token:</strong> <code id="token-user">(none)</code></p>
+    <p><strong>Текущий пользователь согласно токену выше:</strong> <code id="token-user">(none)</code></p>
   </div>
 
   <div class="section vuln">
-    <h2>Vulnerable login (incorrect Implicit Flow implementation)</h2>
+    <h2>Окно аутентификации</h2>
     <p>
       Здесь фронтенд отправляет на backend <code>access_token</code> и произвольный
       <code>user_id</code>. Сервер создаёт сессию, доверяя этому <code>user_id</code>,
@@ -109,7 +109,7 @@
           (подставляем значение из токена, например <code>preferred_username</code>):
         </p>
         <input type="text" id="normal-user-id" />
-        <button class="btn" id="btn-login-normal">Login as current user</button>
+        <button class="btn" id="btn-login-normal">Аутентификация</button>
       </div>
 
       <div>
@@ -120,7 +120,7 @@
         </p>
         <input type="text" id="attack-user-id" placeholder="victim or other user id" />
         <button class="btn btn-danger" id="btn-login-attack">
-          Simulate attack with custom user_id
+          Симуляция атаки
         </button>
       </div>
     </div>
@@ -130,25 +130,25 @@
   </div>
 
   <div class="section">
-    <h2>Server session view</h2>
+    <h2>Обработка со стороны сервера</h2>
     <p>
       Маршрут <code>GET /me</code> показывает, кого backend считает текущим
       пользователем. При успешной атаке он покажет <code>user_id</code> жертвы,
       хотя токен принадлежит атакующему.
     </p>
     <button class="btn" id="btn-me">GET /me</button>
-    <button class="btn" id="btn-logout-backend">Backend logout (destroy session)</button>
+    <button class="btn" id="btn-logout-backend">Выход из системы</button>
     <h3>Ответ /me</h3>
     <pre id="me-response"></pre>
   </div>
 
   <!-- Кнопка запуска Implicit Flow на Keycloak -->
   <div class="section ok">
-    <h2>Start Keycloak login</h2>
+    <h2>Аутентификация</h2>
     <p>
       Если вы ещё не аутентифицированы через Keycloak, нажмите кнопку ниже.
     </p>
-    <button class="btn" id="btn-login">Login via Keycloak (Implicit Flow)</button>
+    <button class="btn" id="btn-login">Аутентификация ( перенаправление к провайдеру )</button>
   </div>
 
   <script>
