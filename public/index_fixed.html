@@ -168,4 +168,218 @@
 
     function decodeJwtPayload(token) {
       try {
-        const payload = 
+        const payload = token.split('.')[1];
+        const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+        return JSON.parse(decoded);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function decodeJwtPayloadPretty(token) {
+      const obj = decodeJwtPayload(token);
+      if (!obj) return 'Failed to decode token payload';
+      return JSON.stringify(obj, null, 2);
+    }
+
+    function generateNonce(length = 32) {
+      const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let result = '';
+      for (let i = 0; i < length; i++) {
+        const idx = Math.floor(Math.random() * chars.length);
+        result += chars.charAt(idx);
+      }
+      return result;
+    }
+
+    function buildAuthUrl() {
+      const params = new URLSearchParams({
+        client_id: CLIENT_ID,
+        redirect_uri: REDIRECT_URI,
+        response_type: 'id_token token',
+        scope: 'openid profile email',
+        nonce: generateNonce()
+      });
+
+      return (
+        KEYCLOAK_BASE +
+        '/realms/' +
+        encodeURIComponent(REALM) +
+        '/protocol/openid-connect/auth?' +
+        params.toString()
+      );
+    }
+
+    function buildLogoutUrl(idToken) {
+      const params = new URLSearchParams({
+        id_token_hint: idToken || '',
+        post_logout_redirect_uri: REDIRECT_URI
+      });
+      return (
+        KEYCLOAK_BASE +
+        '/realms/' +
+        encodeURIComponent(REALM) +
+        '/protocol/openid-connect/logout?' +
+        params.toString()
+      );
+    }
+
+    function safeOnClick(id, handler) {
+      const el = document.getElementById(id);
+      if (!el) {
+        console.warn('Element not found for id =', id);
+        return;
+      }
+      el.onclick = handler;
+    }
+
+    function init() {
+      const statusEl = document.getElementById('status');
+      const tokenShortEl = document.getElementById('token-short');
+      const tokenPayloadEl = document.getElementById('token-payload');
+      const tokenUserEl = document.getElementById('token-user');
+
+      const normalUserInput = document.getElementById('normal-user-id');
+      const attackUserInput = document.getElementById('attack-user-id');
+      const loginRespEl = document.getElementById('login-response');
+      const meRespEl = document.getElementById('me-response');
+
+      const params = parseHash();
+      const accessToken = params.get('access_token');
+      const idToken = params.get('id_token');
+      const error = params.get('error');
+
+      if (error) {
+        statusEl.textContent = 'Auth error: ' + error;
+        console.error('Auth error:', error, params.get('error_description'));
+      }
+
+      let currentUserFromToken = null;
+
+      if (!accessToken) {
+        statusEl.textContent =
+          'Не аутентифицированы в Keycloak. Нажмите кнопку аутентификации.';
+        tokenShortEl.textContent = '(no token)';
+        tokenPayloadEl.textContent = '(no token payload)';
+      } else {
+        statusEl.textContent = 'Аутентификация в Keycloak (implicit flow) выполнена.';
+        tokenShortEl.textContent = accessToken.substring(0, 80) + '...';
+        tokenPayloadEl.textContent = decodeJwtPayloadPretty(accessToken);
+
+        const payload = decodeJwtPayload(accessToken);
+        if (payload) {
+          currentUserFromToken =
+            payload.preferred_username || payload.email || payload.sub || null;
+        }
+
+        tokenUserEl.textContent = currentUserFromToken || '(unknown)';
+
+        if (currentUserFromToken && normalUserInput) {
+          normalUserInput.value = currentUserFromToken;
+        }
+      }
+
+      safeOnClick('btn-login', () => {
+        window.location.href = buildAuthUrl();
+      });
+
+      // Нормальный сценарий (сервер всё равно использует user из токена)
+      safeOnClick('btn-login-normal', () => {
+        loginRespEl.textContent = '';
+        if (!accessToken) {
+          alert('Нет токена. Сначала выполните аутентификацию в Keycloak.');
+          return;
+        }
+        const userId = normalUserInput.value.trim();
+        if (!userId) {
+          alert('user_id пустой');
+          return;
+        }
+
+        fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            access_token: accessToken,
+            user_id: userId
+          })
+        })
+          .then(r => r.json())
+          .then(data => {
+            loginRespEl.textContent = JSON.stringify(data, null, 2);
+          })
+          .catch(err => {
+            loginRespEl.textContent = 'Error: ' + err;
+          });
+      });
+
+      // "Атака": сервер теперь игнорирует этот user_id и привязывает сессию к токену
+      safeOnClick('btn-login-attack', () => {
+        loginRespEl.textContent = '';
+        if (!accessToken) {
+          alert('Нет токена. Сначала выполните аутентификацию в Keycloak.');
+          return;
+        }
+        const userId = attackUserInput.value.trim();
+        if (!userId) {
+          alert('user_id жертвы пустой');
+          return;
+        }
+
+        fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            access_token: accessToken,
+            user_id: userId
+          })
+        })
+          .then(r => r.json())
+          .then(data => {
+            loginRespEl.textContent =
+              JSON.stringify(data, null, 2) +
+              '\n\nПояснение: сервер проигнорировал указанный user_id = "' +
+              userId +
+              '" и привязал сессию к пользователю из токена (' +
+              (currentUserFromToken || 'неизвестно') +
+              ').';
+          })
+          .catch(err => {
+            loginRespEl.textContent = 'Error: ' + err;
+          });
+      });
+
+      safeOnClick('btn-me', () => {
+        meRespEl.textContent = '';
+        fetch('/me', { credentials: 'include' })
+          .then(r => r.json())
+          .then(data => {
+            meRespEl.textContent = JSON.stringify(data, null, 2);
+          })
+          .catch(err => {
+            meRespEl.textContent = 'Error: ' + err;
+          });
+      });
+
+      safeOnClick('btn-logout-backend', () => {
+        meRespEl.textContent = '';
+        fetch('/logout', { method: 'POST', credentials: 'include' })
+          .then(r => r.json())
+          .then(data => {
+            meRespEl.textContent = JSON.stringify(data, null, 2);
+          })
+          .catch(err => {
+            meRespEl.textContent = 'Error: ' + err;
+          });
+      });
+
+      window.logoutFromKeycloak = () => {
+        window.location.href = buildLogoutUrl(idToken);
+      };
+    }
+
+    window.addEventListener('load', init);
+  </script>
+</body>
+</html>
