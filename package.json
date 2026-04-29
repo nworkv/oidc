@@ -1,15 +1,25 @@
 {
-  "name": "server",
+  "name": "implicit-vuln-server",
   "version": "1.0.0",
-  "description": "Minimal Express + Keycloak implicit flow example",
+  "description": "Demo of incorrect Implicit Flow implementation (Keycloak + Express)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": [
+    "express",
+    "keycloak",
+    "oauth2",
+    "openid-connect",
+    "implicit-flow",
+    "security-demo"
+  ],
+  "author": "",
   "license": "ISC",
   "dependencies": {
     "cors": "2.8.5",
     "dotenv": "17.2.1",
-    "express": "5.1.0"
+    "express": "5.1.0",
+    "express-session": "1.18.2"
   }
 }
