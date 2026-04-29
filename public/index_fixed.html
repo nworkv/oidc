@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Исследование уязвимости неправильного использования Implicit Flow</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1, h2, h3 {
+      text-align: center;
+    }
+    .section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+    .section.vuln {
+      border-color: #f44336;
+      background: #fff5f5;
+    }
+    .section.ok {
+      border-color: #4caf50;
+      background: #f5fff5;
+    }
+    .btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background-color: #4caf50;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+      margin: 5px;
+      cursor: pointer;
+      border: none;
+    }
+    .btn:hover {
+      background-color: #45a049;
+    }
+    .btn-danger {
+      background-color: #f44336;
+    }
+    .btn-danger:hover {
+      background-color: #e53935;
+    }
+    .flex {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .flex > div {
+      flex: 1 1 300px;
+    }
+    pre {
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow: auto;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0 10px 0;
+      box-sizing: border-box;
+    }
+    code {
+      background: #f5f5f5;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Исследование уязвимости неправильного использования Implicit Flow</h1>
+
+  <div class="section">
+    <h2>Статус</h2>
+    <p id="status">Проверка токена...</p>
+    <p><strong>Текущий токен (80 символов):</strong></p>
+    <pre id="token-short"></pre>
+  </div>
+
+  <div class="section">
+    <h2>Данные токена</h2>
+    <p><strong>Расшифрованные данные токена:</strong></p>
+    <pre id="token-payload"></pre>
+    <p><strong>Текущий пользователь согласно токену:</strong> <code id="token-user">(none)</code></p>
+  </div>
+
+  <div class="section vuln">
+    <h2>Окно аутентификации / эксперимент</h2>
+    <p>
+      Фронтенд по‑прежнему отправляет на backend <code>access_token</code> и произвольный
+      <code>user_id</code>. В уязвимой реализации сервер доверял этому <code>user_id</code>
+      и строил по нему сессию. В исправленной реализации сервер игнорирует
+      <code>user_id</code> из браузера и определяет пользователя только по проверенному токену.
+    </p>
+
+    <div class="flex">
+      <div>
+        <h3>Нормальный сценарий</h3>
+        <p>
+          <strong>user_id для нормального логина</strong>
+          (значение из токена, например <code>preferred_username</code>):
+        </p>
+        <input type="text" id="normal-user-id" />
+        <button class="btn" id="btn-login-normal">Аутентификация</button>
+      </div>
+
+      <div>
+        <h3>Симуляция атаки</h3>
+        <p>
+          <strong>user_id жертвы</strong> (атакующий подставляет сюда чужой идентификатор,
+          но использует свой токен). В исправленной версии сервера эта попытка больше
+          не меняет сессию: сервер всё равно привяжет её к владельцу токена.
+        </p>
+        <input type="text" id="attack-user-id" placeholder="victim или другой user id" />
+        <button class="btn btn-danger" id="btn-login-attack">
+          Симуляция атаки
+        </button>
+      </div>
+    </div>
+
+    <h3>Ответ /login</h3>
+    <pre id="login-response"></pre>
+  </div>
+
+  <div class="section">
+    <h2>Обработка со стороны сервера</h2>
+    <p>
+      Маршрут <code>GET /me</code> показывает, кого backend считает текущим
+      пользователем. В уязвимой версии он мог показывать <code>user_id</code> жертвы.
+      В исправленной версии он всегда показывает владельца проверенного токена,
+      даже если в запросе на <code>/login</code> передавался поддельный <code>user_id</code>.
+    </p>
+    <button class="btn" id="btn-me">GET /me</button>
+    <button class="btn" id="btn-logout-backend">Выход из системы</button>
+    <h3>Ответ /me</h3>
+    <pre id="me-response"></pre>
+  </div>
+
+  <div class="section ok">
+    <h2>Аутентификация в Keycloak</h2>
+    <p>
+      Если вы ещё не аутентифицированы через Keycloak, нажмите кнопку ниже.
+    </p>
+    <button class="btn" id="btn-login">Аутентификация (перенаправление к провайдеру)</button>
+  </div>
+
+  <script>
+    const KEYCLOAK_BASE = 'http://10.0.2.15:8080';
+    const REALM = 'test-realm';
+    const CLIENT_ID = 'client_id';
+    const REDIRECT_URI = 'http://10.0.2.15:3000';
+
+    function parseHash() {
+      const hash = window.location.hash.startsWith('#')
+        ? window.location.hash.substring(1)
+        : window.location.hash;
+      return new URLSearchParams(hash);
+    }
+
+    function decodeJwtPayload(token) {
+      try {
+        const payload = 
