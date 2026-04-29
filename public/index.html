@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Keycloak Implicit Flow Example</title>
+  <title>Implicit Flow without keycloak-js</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -36,12 +36,16 @@
   </style>
 </head>
 <body>
-  <h1>Keycloak Implicit Flow (Minimal)</h1>
-  <p id="status">Initializing Keycloak...</p>
+  <h1>Keycloak Implicit Flow (no keycloak-js)</h1>
+  <p id="status">Checking tokens...</p>
 
   <div id="controls" style="display:none;">
     <button id="btn-api" class="btn">Call /api/protected</button>
     <button id="btn-logout" class="btn">Logout</button>
+  </div>
+
+  <div>
+    <button id="btn-login" class="btn">Login</button>
   </div>
 
   <h2>Access Token (payload)</h2>
@@ -50,15 +54,18 @@
   <h2>/api/protected response</h2>
   <pre id="api-response"></pre>
 
-  <!-- keycloak-js с CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/keycloak-js@latest/dist/keycloak.min.js"></script>
   <script>
-    // Конфиг Keycloak должен совпадать с .env / настройками клиента
-    const keycloak = new Keycloak({
-      url: 'http://10.0.2.15:8080',   // KEYCLOAK_URL
-      realm: 'master',                   // KEYCLOAK_REALM
-      clientId: 'test-client'            // KEYCLOAK_CLIENT_ID
-    });
+    const KEYCLOAK_BASE = 'http://10.0.2.15:8080';
+    const REALM = 'test-realm';
+    const CLIENT_ID = 'client_id';
+    const REDIRECT_URI = 'http://10.0.2.15:3000';
+
+    function parseHash() {
+      const hash = window.location.hash.startsWith('#')
+        ? window.location.hash.substring(1)
+        : window.location.hash;
+      return new URLSearchParams(hash);
+    }
 
     function decodeJwtPayload(token) {
       try {
@@ -70,55 +77,97 @@
       }
     }
 
-    keycloak
-      .init({
-        onLoad: 'login-required',
-        flow: 'implicit' // ключевой параметр для implicit flow
-      })
-      .then(authenticated => {
-        if (!authenticated) {
-          document.getElementById('status').textContent = 'Not authenticated, redirecting...';
-          return keycloak.login();
-        }
-
-        document.getElementById('status').textContent = 'Authenticated';
-        document.getElementById('controls').style.display = 'block';
-
-        // Показать payload access_token
-        document.getElementById('token-payload').textContent =
-          decodeJwtPayload(keycloak.token);
-
-        // Кнопка вызова API
-        document.getElementById('btn-api').onclick = () => {
-          fetch('/api/protected', {
-            headers: {
-              Authorization: 'Bearer ' + keycloak.token
-            }
-          })
-            .then(r => r.json())
-            .then(data => {
-              document.getElementById('api-response').textContent =
-                JSON.stringify(data, null, 2);
-            })
-            .catch(err => {
-              document.getElementById('api-response').textContent =
-                'Error: ' + err;
-            });
-        };
-
-        // Кнопка logout
-        document.getElementById('btn-logout').onclick = () => {
-          keycloak.logout({ redirectUri: window.location.origin });
-        };
-
-        // (опционально) периодическое обновление токена — в implicit refresh token нет,
-        // поэтому чаще просто логин/редирект при истечении срока. [web:36][web:35]
-      })
-      .catch(err => {
-        console.error('Failed to initialize Keycloak', err);
-        document.getElementById('status').textContent =
-          'Failed to initialize Keycloak';
+    function buildAuthUrl() {
+      const params = new URLSearchParams({
+        client_id: CLIENT_ID,
+        redirect_uri: REDIRECT_URI,
+        response_type: 'id_token token', // implicit: id_token + access_token
+        scope: 'openid profile email',
+        nonce: crypto.randomUUID()
       });
+
+      return (
+        KEYCLOAK_BASE +
+        '/realms/' +
+        encodeURIComponent(REALM) +
+        '/protocol/openid-connect/auth?' +
+        params.toString()
+      );
+    }
+
+    function buildLogoutUrl(idToken) {
+      const params = new URLSearchParams({
+        id_token_hint: idToken || '',
+        post_logout_redirect_uri: REDIRECT_URI
+      });
+      return (
+        KEYCLOAK_BASE +
+        '/realms/' +
+        encodeURIComponent(REALM) +
+        '/protocol/openid-connect/logout?' +
+        params.toString()
+      );
+    }
+
+    function init() {
+      const statusEl = document.getElementById('status');
+      const controlsEl = document.getElementById('controls');
+      const params = parseHash();
+
+      const accessToken = params.get('access_token');
+      const idToken = params.get('id_token');
+      const error = params.get('error');
+
+      if (error) {
+        statusEl.textContent = 'Auth error: ' + error;
+        console.error('Auth error:', error, params.get('error_description'));
+        return;
+      }
+
+      if (!accessToken) {
+        statusEl.textContent =
+          'Not authenticated. Click "Login" to sign in.';
+      } else {
+        statusEl.textContent = 'Authenticated via implicit flow';
+        controlsEl.style.display = 'block';
+        document.getElementById('token-payload').textContent =
+          decodeJwtPayload(accessToken);
+      }
+
+      // Кнопка Login — чистый redirect на auth endpoint
+      document.getElementById('btn-login').onclick = () => {
+        window.location.href = buildAuthUrl();
+      };
+
+      // Кнопка Logout — redirect на logout endpoint
+      document.getElementById('btn-logout').onclick = () => {
+        window.location.href = buildLogoutUrl(idToken);
+      };
+
+      // Кнопка вызова API
+      document.getElementById('btn-api').onclick = () => {
+        if (!accessToken) {
+          alert('No access token. Please login first.');
+          return;
+        }
+        fetch('/api/protected', {
+          headers: {
+            Authorization: 'Bearer ' + accessToken
+          }
+        })
+          .then(r => r.json())
+          .then(data => {
+            document.getElementById('api-response').textContent =
+              JSON.stringify(data, null, 2);
+          })
+          .catch(err => {
+            document.getElementById('api-response').textContent =
+              'Error: ' + err;
+          });
+      };
+    }
+
+    window.addEventListener('load', init);
   </script>
 </body>
 </html>
