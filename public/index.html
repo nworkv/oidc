@@ -3,14 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Implicit Flow without keycloak-js</title>
+  <title>Implicit Flow Vulnerability Demo</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      max-width: 800px;
+      max-width: 1000px;
       margin: 0 auto;
       padding: 20px;
+    }
+    h1, h2, h3 {
       text-align: center;
+    }
+    .section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+    .section.vuln {
+      border-color: #f44336;
+      background: #fff5f5;
+    }
+    .section.ok {
+      border-color: #4caf50;
+      background: #f5fff5;
     }
     .btn {
       display: inline-block;
@@ -19,40 +35,112 @@
       color: white;
       text-decoration: none;
       border-radius: 4px;
-      margin: 10px;
+      margin: 5px;
       cursor: pointer;
+      border: none;
     }
     .btn:hover {
       background-color: #45a049;
     }
+    .btn-danger {
+      background-color: #f44336;
+    }
+    .btn-danger:hover {
+      background-color: #e53935;
+    }
+    .flex {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .flex > div {
+      flex: 1 1 300px;
+    }
     pre {
-      text-align: left;
       background: #f5f5f5;
       padding: 10px;
       border-radius: 4px;
       max-height: 300px;
       overflow: auto;
     }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0 10px 0;
+      box-sizing: border-box;
+    }
+    code {
+      background: #f5f5f5;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
   </style>
 </head>
 <body>
-  <h1>Keycloak Implicit Flow (no keycloak-js)</h1>
-  <p id="status">Checking tokens...</p>
+  <h1>Implicit Flow Vulnerability Demo (Keycloak + Express)</h1>
 
-  <div id="controls" style="display:none;">
-    <button id="btn-api" class="btn">Call /api/protected</button>
-    <button id="btn-logout" class="btn">Logout</button>
+  <div class="section">
+    <h2>Status</h2>
+    <p id="status">Checking tokens...</p>
+    <p><strong>Current access_token (first 40 chars):</strong></p>
+    <pre id="token-short"></pre>
   </div>
 
-  <div>
-    <button id="btn-login" class="btn">Login</button>
+  <div class="section">
+    <h2>Token payload</h2>
+    <p><strong>Decoded access_token payload:</strong></p>
+    <pre id="token-payload"></pre>
+    <p><strong>Current user from token:</strong> <code id="token-user">(none)</code></p>
   </div>
 
-  <h2>Access Token (payload)</h2>
-  <pre id="token-payload"></pre>
+  <div class="section vuln">
+    <h2>Vulnerable login (incorrect Implicit Flow implementation)</h2>
+    <p>
+      Здесь фронтенд отправляет на backend <code>access_token</code> и произвольный
+      <code>user_id</code>. Сервер создаёт сессию, доверяя этому <code>user_id</code>,
+      не проверяя, что токен принадлежит этому пользователю.
+    </p>
 
-  <h2>/api/protected response</h2>
-  <pre id="api-response"></pre>
+    <div class="flex">
+      <div>
+        <h3>Нормальный сценарий</h3>
+        <p>
+          <strong>user_id для нормального логина</strong>
+          (подставляем значение из токена, например <code>preferred_username</code>):
+        </p>
+        <input type="text" id="normal-user-id" />
+        <button class="btn" id="btn-login-normal">Login as current user</button>
+      </div>
+
+      <div>
+        <h3>Симуляция атаки</h3>
+        <p>
+          <strong>user_id жертвы</strong> (атакующий подставляет сюда чужой идентификатор,
+          но использует свой токен):
+        </p>
+        <input type="text" id="attack-user-id" placeholder="victim or other user id" />
+        <button class="btn btn-danger" id="btn-login-attack">
+          Simulate attack with custom user_id
+        </button>
+      </div>
+    </div>
+
+    <h3>Ответ /login</h3>
+    <pre id="login-response"></pre>
+  </div>
+
+  <div class="section">
+    <h2>Server session view</h2>
+    <p>
+      Маршрут <code>GET /me</code> показывает, кого backend считает текущим
+      пользователем. При успешной атаке он покажет <code>user_id</code> жертвы,
+      хотя токен принадлежит атакующему.
+    </p>
+    <button class="btn" id="btn-me">GET /me</button>
+    <button class="btn" id="btn-logout-backend">Backend logout (destroy session)</button>
+    <h3>Ответ /me</h3>
+    <pre id="me-response"></pre>
+  </div>
 
   <script>
     const KEYCLOAK_BASE = 'http://10.0.2.15:8080';
@@ -71,13 +159,18 @@
       try {
         const payload = token.split('.')[1];
         const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-        return JSON.stringify(JSON.parse(decoded), null, 2);
+        return JSON.parse(decoded);
       } catch (e) {
-        return 'Failed to decode token payload';
+        return null;
       }
     }
 
-    // Генератор nonce, совместимый со старыми браузерами
+    function decodeJwtPayloadPretty(token) {
+      const obj = decodeJwtPayload(token);
+      if (!obj) return 'Failed to decode token payload';
+      return JSON.stringify(obj, null, 2);
+    }
+
     function generateNonce(length = 32) {
       const chars =
         'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -93,7 +186,7 @@
       const params = new URLSearchParams({
         client_id: CLIENT_ID,
         redirect_uri: REDIRECT_URI,
-        response_type: 'id_token token', // implicit: id_token + access_token
+        response_type: 'id_token token',
         scope: 'openid profile email',
         nonce: generateNonce()
       });
@@ -123,9 +216,16 @@
 
     function init() {
       const statusEl = document.getElementById('status');
-      const controlsEl = document.getElementById('controls');
-      const params = parseHash();
+      const tokenShortEl = document.getElementById('token-short');
+      const tokenPayloadEl = document.getElementById('token-payload');
+      const tokenUserEl = document.getElementById('token-user');
 
+      const normalUserInput = document.getElementById('normal-user-id');
+      const attackUserInput = document.getElementById('attack-user-id');
+      const loginRespEl = document.getElementById('login-response');
+      const meRespEl = document.getElementById('me-response');
+
+      const params = parseHash();
       const accessToken = params.get('access_token');
       const idToken = params.get('id_token');
       const error = params.get('error');
@@ -133,49 +233,138 @@
       if (error) {
         statusEl.textContent = 'Auth error: ' + error;
         console.error('Auth error:', error, params.get('error_description'));
-        return;
       }
+
+      let currentUserFromToken = null;
 
       if (!accessToken) {
         statusEl.textContent =
-          'Not authenticated. Click "Login" to sign in.';
+          'Not authenticated via Keycloak. Click "Login" to start Implicit Flow.';
+        tokenShortEl.textContent = '(no token)';
+        tokenPayloadEl.textContent = '(no token payload)';
       } else {
-        statusEl.textContent = 'Authenticated via implicit flow';
-        controlsEl.style.display = 'block';
-        document.getElementById('token-payload').textContent =
-          decodeJwtPayload(accessToken);
+        statusEl.textContent = 'Authenticated via Keycloak (implicit flow).';
+        tokenShortEl.textContent = accessToken.substring(0, 80) + '...';
+        tokenPayloadEl.textContent = decodeJwtPayloadPretty(accessToken);
+
+        const payload = decodeJwtPayload(accessToken);
+        if (payload) {
+          currentUserFromToken =
+            payload.preferred_username || payload.email || payload.sub || null;
+        }
+
+        tokenUserEl.textContent = currentUserFromToken || '(unknown)';
+
+        if (currentUserFromToken) {
+          normalUserInput.value = currentUserFromToken;
+        }
       }
 
-      // Login → redirect на auth endpoint Keycloak
       document.getElementById('btn-login').onclick = () => {
         window.location.href = buildAuthUrl();
       };
 
-      // Logout → redirect на logout endpoint Keycloak
-      document.getElementById('btn-logout').onclick = () => {
-        window.location.href = buildLogoutUrl(idToken);
-      };
-
-      // Вызов защищённого API
-      document.getElementById('btn-api').onclick = () => {
+      // Нормальный сценарий: user_id = user из токена
+      document.getElementById('btn-login-normal').onclick = () => {
+        loginRespEl.textContent = '';
         if (!accessToken) {
-          alert('No access token. Please login first.');
+          alert('No access token. Please login via Keycloak first.');
           return;
         }
-        fetch('/api/protected', {
+        const userId = normalUserInput.value.trim();
+        if (!userId) {
+          alert('user_id is empty');
+          return;
+        }
+
+        fetch('/login', {
+          method: 'POST',
           headers: {
-            Authorization: 'Bearer ' + accessToken
-          }
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            access_token: accessToken,
+            user_id: userId
+          })
         })
           .then(r => r.json())
           .then(data => {
-            document.getElementById('api-response').textContent =
-              JSON.stringify(data, null, 2);
+            loginRespEl.textContent = JSON.stringify(data, null, 2);
           })
           .catch(err => {
-            document.getElementById('api-response').textContent =
-              'Error: ' + err;
+            loginRespEl.textContent = 'Error: ' + err;
           });
+      };
+
+      // Симуляция атаки: тот же токен, но другой user_id
+      document.getElementById('btn-login-attack').onclick = () => {
+        loginRespEl.textContent = '';
+        if (!accessToken) {
+          alert('No access token. Please login via Keycloak first.');
+          return;
+        }
+        const userId = attackUserInput.value.trim();
+        if (!userId) {
+          alert('Attack user_id is empty');
+          return;
+        }
+
+        fetch('/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            access_token: accessToken,
+            user_id: userId
+          })
+        })
+          .then(r => r.json())
+          .then(data => {
+            loginRespEl.textContent =
+              JSON.stringify(data, null, 2) +
+              '\n\nNOTE: backend now believes session_user = ' +
+              userId +
+              ' even though the token belongs to ' +
+              (currentUserFromToken || '(unknown)');
+          })
+          .catch(err => {
+            loginRespEl.textContent = 'Error: ' + err;
+          });
+      };
+
+      document.getElementById('btn-me').onclick = () => {
+        meRespEl.textContent = '';
+        fetch('/me', {
+          credentials: 'include'
+        })
+          .then(r => r.json())
+          .then(data => {
+            meRespEl.textContent = JSON.stringify(data, null, 2);
+          })
+          .catch(err => {
+            meRespEl.textContent = 'Error: ' + err;
+          });
+      };
+
+      document.getElementById('btn-logout-backend').onclick = () => {
+        meRespEl.textContent = '';
+        fetch('/logout', {
+          method: 'POST',
+          credentials: 'include'
+        })
+          .then(r => r.json())
+          .then(data => {
+            meRespEl.textContent = JSON.stringify(data, null, 2);
+          })
+          .catch(err => {
+            meRespEl.textContent = 'Error: ' + err;
+          });
+      };
+
+      // Logout из Keycloak (опционально, можно вызвать из консоли)
+      window.logoutFromKeycloak = () => {
+        window.location.href = buildLogoutUrl(idToken);
       };
     }
 
